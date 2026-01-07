@@ -1,26 +1,347 @@
 <!DOCTYPE html>
-<!--  Licensed to the .NET Foundation under one or more agreements. -->
-<!-- The .NET Foundation licenses this file to you under the MIT license. -->
 <html>
-
 <head>
-  <title>msbuild-binlog-perfview</title>
+  <title>MSBuild Binlog to Perfetto</title>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="preload" id="webassembly" />
   <script type="importmap"></script>
   <script type='module' src="main#[.{fingerprint}].js"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    h1 {
+      margin-bottom: 10px;
+      font-size: 1.8rem;
+      color: #fff;
+    }
+
+    .subtitle {
+      margin-bottom: 30px;
+      color: #888;
+      font-size: 0.95rem;
+    }
+
+    #drop-zone {
+      width: 100%;
+      max-width: 600px;
+      min-height: 250px;
+      border: 3px dashed #444;
+      border-radius: 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      background: #16213e;
+    }
+
+    #drop-zone:hover {
+      border-color: #0f4c75;
+      background: #1a2744;
+    }
+
+    #drop-zone.drag-over {
+      border-color: #3282b8;
+      background: #1e3a5f;
+      transform: scale(1.02);
+    }
+
+    #drop-zone.processing {
+      pointer-events: none;
+      opacity: 0.7;
+    }
+
+    .drop-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+
+    .drop-text {
+      font-size: 1.1rem;
+      color: #bbb;
+      text-align: center;
+    }
+
+    .drop-text-small {
+      font-size: 0.85rem;
+      color: #666;
+      margin-top: 8px;
+    }
+
+    #file-input {
+      display: none;
+    }
+
+    #status {
+      margin-top: 20px;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      display: none;
+    }
+
+    #status.error {
+      display: block;
+      background: #5c1a1a;
+      color: #ff8a8a;
+    }
+
+    #status.success {
+      display: block;
+      background: #1a5c2a;
+      color: #8aff9a;
+    }
+
+    #status.loading {
+      display: block;
+      background: #3a3a1a;
+      color: #fffa8a;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid #fffa8a;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-right: 8px;
+      vertical-align: middle;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .file-info {
+      margin-top: 16px;
+      padding: 12px 16px;
+      background: #0f0f23;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      color: #888;
+      display: none;
+    }
+
+    .file-info.visible {
+      display: block;
+    }
+
+    #download-btn {
+      margin-top: 16px;
+      padding: 10px 20px;
+      background: #3282b8;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      display: none;
+    }
+
+    #download-btn:hover {
+      background: #4a9fd4;
+    }
+
+    #download-btn.visible {
+      display: inline-block;
+    }
+
+    .options {
+      margin-top: 20px;
+      padding: 16px 20px;
+      background: #16213e;
+      border-radius: 10px;
+      width: 100%;
+      max-width: 600px;
+    }
+
+    .options-title {
+      font-size: 0.85rem;
+      color: #888;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .options-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+
+    .option-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      padding: 6px 8px;
+      border-radius: 6px;
+      transition: background 0.15s;
+    }
+
+    .option-item:hover {
+      background: #1a2744;
+    }
+
+    .option-item input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      accent-color: #3282b8;
+      cursor: pointer;
+    }
+
+    .option-item label {
+      font-size: 0.9rem;
+      color: #ccc;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .option-item.disabled {
+      opacity: 0.5;
+      pointer-events: none;
+    }
+
+    .format-section {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid #2a2a4e;
+    }
+
+    .format-options {
+      display: flex;
+      gap: 16px;
+    }
+
+    .format-option {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      padding: 6px 8px;
+      border-radius: 6px;
+      transition: background 0.15s;
+    }
+
+    .format-option:hover {
+      background: #1a2744;
+    }
+
+    .format-option input[type="radio"] {
+      width: 16px;
+      height: 16px;
+      accent-color: #3282b8;
+      cursor: pointer;
+    }
+
+    .format-option label {
+      font-size: 0.9rem;
+      color: #ccc;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    footer {
+      margin-top: 40px;
+      color: #555;
+      font-size: 0.8rem;
+    }
+
+    footer a {
+      color: #3282b8;
+      text-decoration: none;
+    }
+
+    footer a:hover {
+      text-decoration: underline;
+    }
+  </style>
 </head>
-
 <body>
-  <h1>Stopwatch</h1>
-  <p>
-    Time elapsed in .NET is <span id="time"><i>loading...</i></span>
-  </p>
-  <p>
-    <button id="pause">Pause</button>
-    <button id="reset">Reset</button>
-  </p>
-</body>
+  <h1>MSBuild Binlog to Perfetto</h1>
+  <p class="subtitle">Convert MSBuild binary logs to interactive trace visualizations</p>
 
+  <div id="drop-zone">
+    <div class="drop-icon">📁</div>
+    <div class="drop-text">Drop a .binlog file here</div>
+    <div class="drop-text-small">or click to browse</div>
+  </div>
+
+  <input type="file" id="file-input" accept=".binlog">
+
+  <div class="options">
+    <div class="options-title">Include in trace</div>
+    <div class="options-grid">
+      <div class="option-item">
+        <input type="checkbox" id="opt-projects" checked>
+        <label for="opt-projects">Projects</label>
+      </div>
+      <div class="option-item">
+        <input type="checkbox" id="opt-targets" checked>
+        <label for="opt-targets">Targets</label>
+      </div>
+      <div class="option-item">
+        <input type="checkbox" id="opt-tasks">
+        <label for="opt-tasks">Tasks</label>
+      </div>
+      <div class="option-item">
+        <input type="checkbox" id="opt-messages">
+        <label for="opt-messages">Messages</label>
+      </div>
+      <div class="option-item">
+        <input type="checkbox" id="opt-warnings" checked>
+        <label for="opt-warnings">Warnings</label>
+      </div>
+      <div class="option-item">
+        <input type="checkbox" id="opt-errors" checked>
+        <label for="opt-errors">Errors</label>
+      </div>
+    </div>
+    <div class="format-section">
+      <div class="options-title">Output format</div>
+      <div class="format-options">
+        <div class="format-option">
+          <input type="radio" id="fmt-json" name="format" value="json">
+          <label for="fmt-json">Chrome JSON</label>
+        </div>
+        <div class="format-option">
+          <input type="radio" id="fmt-proto" name="format" value="proto" checked>
+          <label for="fmt-proto">Perfetto protobuf</label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="status"></div>
+
+  <div id="file-info" class="file-info"></div>
+
+  <button id="download-btn">Download Perfetto Trace</button>
+
+  <footer>
+    Powered by <a href="https://perfetto.dev" target="_blank">Perfetto</a> |
+    Uses <a href="https://github.com/KirillOsenkov/MSBuildStructuredLog" target="_blank">MSBuild.StructuredLogger</a>
+  </footer>
+</body>
 </html>
