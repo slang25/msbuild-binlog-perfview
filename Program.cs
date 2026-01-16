@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices.JavaScript;
+using System.Runtime.Versioning;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -13,8 +14,25 @@ Console.WriteLine("MSBuild Binlog to Perfetto Viewer loaded");
 
 await System.Threading.Tasks.Task.Delay(-1); // Keep runtime alive for JS calls
 
+[SupportedOSPlatform("browser")]
 public partial class BinlogConverter
 {
+    // Import postProgress from globalThis where worker.js exposes it
+    [JSImport("globalThis.postProgress")]
+    private static partial void PostProgressInternal(string message, int current, int total);
+
+    // Wrapper that handles failures gracefully
+    private static void PostProgress(string message, int current, int total)
+    {
+        try
+        {
+            PostProgressInternal(message, current, total);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"PostProgress failed: {ex.Message}");
+        }
+    }
     [JSExport]
     public static string ConvertToTrace(
         byte[] binlogData,
@@ -35,10 +53,27 @@ public partial class BinlogConverter
 
             long? buildStartTime = null;
 
+            // Progress tracking
+            long totalBytes = stream.Length;
+            int lastProgressPercent = 0;
+            int recordCount = 0;
+
+            PostProgress("Reading binlog records...", 0, 100);
+
             foreach (var record in reader.ReadRecords(stream))
             {
                 var args = record.Args;
                 if (args == null) continue;
+
+                recordCount++;
+
+                // Report progress every 5%
+                int progressPercent = (int)((stream.Position * 100) / totalBytes);
+                if (progressPercent >= lastProgressPercent + 5)
+                {
+                    lastProgressPercent = progressPercent;
+                    PostProgress($"Processing records ({recordCount:N0} read)...", progressPercent, 100);
+                }
 
                 var ctx = args.BuildEventContext;
                 long timestamp = args.Timestamp.Ticks / 10;
@@ -284,8 +319,13 @@ public partial class BinlogConverter
                 }
             }
 
+            PostProgress($"Serializing {events.Count:N0} trace events...", 95, 100);
+
             var trace = new TraceDocument { TraceEvents = events };
-            return JsonSerializer.Serialize(trace, TraceJsonContext.Default.TraceDocument);
+            var result = JsonSerializer.Serialize(trace, TraceJsonContext.Default.TraceDocument);
+
+            PostProgress("Complete!", 100, 100);
+            return result;
         }
         catch (Exception ex)
         {
@@ -316,6 +356,13 @@ public partial class BinlogConverter
 
             long? buildStartTime = null;
 
+            // Progress tracking
+            long totalBytes = stream.Length;
+            int lastProgressPercent = 0;
+            int recordCount = 0;
+
+            PostProgress("Reading binlog records...", 0, 100);
+
             // Helper to get or create track UUID for a node
             // All events on the same node go on the same track for proper flame graph stacking
             ulong GetTrackUuid(int nodeId)
@@ -332,6 +379,16 @@ public partial class BinlogConverter
             {
                 var args = record.Args;
                 if (args == null) continue;
+
+                recordCount++;
+
+                // Report progress every 5%
+                int progressPercent = (int)((stream.Position * 100) / totalBytes);
+                if (progressPercent >= lastProgressPercent + 5)
+                {
+                    lastProgressPercent = progressPercent;
+                    PostProgress($"Processing records ({recordCount:N0} read)...", progressPercent, 100);
+                }
 
                 var ctx = args.BuildEventContext;
                 long timestamp = args.Timestamp.Ticks * 100; // Convert to nanoseconds
@@ -434,10 +491,17 @@ public partial class BinlogConverter
                 }
             }
 
-            return writer.ToArray();
+            PostProgress($"Writing protobuf trace ({recordCount:N0} records)...", 95, 100);
+
+            var result = writer.ToArray();
+
+            PostProgress("Complete!", 100, 100);
+            return result;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            Console.WriteLine($"ConvertToProtobuf error: {ex.Message}");
+            Console.WriteLine($"Stack trace: {ex.StackTrace}");
             return Array.Empty<byte>();
         }
     }

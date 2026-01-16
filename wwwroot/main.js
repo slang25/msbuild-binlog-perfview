@@ -1,11 +1,8 @@
-import { dotnet } from './_framework/dotnet.js'
+import { invoke, waitForReady, setProgressCallback } from './worker-client.js'
 
 // DOM elements
 const dropZone = document.getElementById('drop-zone');
 const fileInput = document.getElementById('file-input');
-const status = document.getElementById('status');
-const fileInfo = document.getElementById('file-info');
-const downloadBtn = document.getElementById('download-btn');
 
 // Option checkboxes
 const optProjects = document.getElementById('opt-projects');
@@ -15,41 +12,99 @@ const optMessages = document.getElementById('opt-messages');
 const optWarnings = document.getElementById('opt-warnings');
 const optErrors = document.getElementById('opt-errors');
 
-// Format radio buttons
-const fmtJson = document.getElementById('fmt-json');
-const fmtProto = document.getElementById('fmt-proto');
-
 // State
-let currentTraceData = null; // Can be JSON string or Uint8Array
-let currentTraceFormat = 'json';
+let currentTraceData = null;
 let currentFileName = null;
-let wasmExports = null;
+let isProcessing = false;
 
-// Initialize WASM
+// Store original drop zone content
+const originalDropZoneContent = dropZone.innerHTML;
+
+// Initialize WASM worker
 async function initWasm() {
     try {
-        setStatus('loading', '<span class="spinner"></span>Loading WebAssembly runtime...');
+        showProcessingState('Loading WebAssembly...', 0);
 
-        const { getAssemblyExports, getConfig, runMain } = await dotnet.create();
+        // Set up progress callback to show conversion progress
+        setProgressCallback((message, current, total) => {
+            const percent = Math.round((current / total) * 100);
+            showProcessingState(message, percent);
+        });
 
-        const config = getConfig();
-        wasmExports = await getAssemblyExports(config.mainAssemblyName);
+        await waitForReady();
 
-        // Start the runtime (keeps it alive for subsequent calls)
-        runMain();
-
-        setStatus('', '');
-        console.log('WASM runtime initialized');
+        resetDropZone();
+        console.log('WASM worker ready');
     } catch (err) {
-        setStatus('error', `Failed to load WebAssembly: ${err.message}`);
-        console.error('WASM init error:', err);
+        showErrorState(`Failed to load WebAssembly: ${err.message}`);
+        console.error('Worker init error:', err);
     }
 }
 
-// Status helpers
-function setStatus(type, message) {
-    status.className = type;
-    status.innerHTML = message;
+// Show processing state in drop zone
+function showProcessingState(message, percent) {
+    isProcessing = true;
+    dropZone.className = 'processing';
+    dropZone.innerHTML = `
+        <div class="processing-content">
+            <div class="processing-spinner"></div>
+            ${currentFileName ? `<div class="processing-filename">${currentFileName}</div>` : ''}
+            <div class="processing-percent">${percent}%</div>
+            <div class="processing-message">${message}</div>
+        </div>
+    `;
+}
+
+// Show success state in drop zone
+function showSuccessState(fileName, fileSize) {
+    isProcessing = false;
+    dropZone.className = 'success';
+    dropZone.innerHTML = `
+        <div class="success-content">
+            <div class="success-icon">✓</div>
+            <div class="success-message">Conversion complete!</div>
+            <div class="success-filename">${fileName} (${formatFileSize(fileSize)})</div>
+            <div class="success-actions">
+                <button class="btn btn-primary" id="open-perfetto-btn">Open in Perfetto</button>
+                <button class="btn btn-secondary" id="download-btn">Download</button>
+            </div>
+            <button class="btn-link" id="convert-another-btn">Convert another file</button>
+        </div>
+    `;
+
+    // Add event listeners for buttons
+    // Open in Perfetto - must be user-initiated click to avoid popup blocker
+    document.getElementById('open-perfetto-btn').addEventListener('click', () => {
+        openPerfetto(currentTraceData, currentFileName);
+    });
+    document.getElementById('download-btn').addEventListener('click', downloadTrace);
+    document.getElementById('convert-another-btn').addEventListener('click', resetDropZone);
+}
+
+// Show error state in drop zone
+function showErrorState(message) {
+    isProcessing = false;
+    dropZone.className = 'error';
+    dropZone.innerHTML = `
+        <div class="error-content">
+            <div class="error-icon">✕</div>
+            <div class="error-message">${message}</div>
+            <div class="success-actions">
+                <button class="btn btn-secondary" id="try-again-btn">Try Again</button>
+            </div>
+        </div>
+    `;
+
+    document.getElementById('try-again-btn').addEventListener('click', resetDropZone);
+}
+
+// Reset drop zone to original state
+function resetDropZone() {
+    isProcessing = false;
+    currentTraceData = null;
+    currentFileName = null;
+    dropZone.className = '';
+    dropZone.innerHTML = originalDropZoneContent;
 }
 
 function formatFileSize(bytes) {
@@ -70,144 +125,65 @@ function getOptions() {
     };
 }
 
-// Get selected format
-function getFormat() {
-    return fmtProto.checked ? 'proto' : 'json';
-}
-
-// Yield to allow UI updates (prevents unresponsive tab warning)
-function yieldToMain() {
-    return new Promise(resolve => setTimeout(resolve, 0));
-}
-
 // File handling
 async function handleFile(file) {
     if (!file.name.toLowerCase().endsWith('.binlog')) {
-        setStatus('error', 'Please drop a .binlog file');
-        return;
-    }
-
-    if (!wasmExports) {
-        setStatus('error', 'WebAssembly runtime not ready. Please wait and try again.');
+        showErrorState('Please select a .binlog file');
         return;
     }
 
     currentFileName = file.name;
-    currentTraceFormat = getFormat();
-    dropZone.classList.add('processing');
-    setStatus('loading', '<span class="spinner"></span>Reading file...');
 
     try {
+        showProcessingState('Reading file...', 0);
+
         // Read file as array buffer
         const arrayBuffer = await file.arrayBuffer();
         const bytes = new Uint8Array(arrayBuffer);
 
-        // Yield to update UI before heavy processing
-        await yieldToMain();
-
-        const formatLabel = currentTraceFormat === 'proto' ? 'Perfetto protobuf' : 'Chrome JSON';
-        setStatus('loading', `<span class="spinner"></span>Converting binlog to ${formatLabel} format...`);
-
-        // Another yield before the heavy WASM call
-        await yieldToMain();
+        showProcessingState('Converting to Perfetto format...', 5);
 
         // Get options
         const opts = getOptions();
 
-        let eventCount = 0;
+        // Call protobuf converter via worker
+        const protoBytes = await invoke('BinlogConverter.ConvertToProtobuf', [
+            bytes,
+            opts.projects,
+            opts.targets,
+            opts.tasks,
+            opts.messages,
+            opts.warnings,
+            opts.errors
+        ]);
 
-        if (currentTraceFormat === 'proto') {
-            // Call protobuf converter
-            const protoBytes = wasmExports.BinlogConverter.ConvertToProtobuf(
-                bytes,
-                opts.projects,
-                opts.targets,
-                opts.tasks,
-                opts.messages,
-                opts.warnings,
-                opts.errors
-            );
-
-            if (protoBytes.length === 0) {
-                throw new Error('Conversion failed');
-            }
-
-            currentTraceData = protoBytes;
-            eventCount = '(protobuf)';
-
-            // Update download button text
-            downloadBtn.textContent = 'Download Perfetto Trace';
-        } else {
-            // Call JSON converter
-            const jsonResult = wasmExports.BinlogConverter.ConvertToTrace(
-                bytes,
-                opts.projects,
-                opts.targets,
-                opts.tasks,
-                opts.messages,
-                opts.warnings,
-                opts.errors
-            );
-
-            // Yield after heavy processing
-            await yieldToMain();
-
-            // Check for error
-            const result = JSON.parse(jsonResult);
-            if (result.error) {
-                throw new Error(result.error);
-            }
-
-            currentTraceData = jsonResult;
-            eventCount = result.traceEvents?.length || 0;
-
-            // Update download button text
-            downloadBtn.textContent = 'Download JSON Trace';
+        if (protoBytes.length === 0) {
+            throw new Error('Conversion failed - no data returned');
         }
 
-        // Show file info
-        fileInfo.innerHTML = `<strong>${file.name}</strong> (${formatFileSize(file.size)}) - ${eventCount} trace events`;
-        fileInfo.classList.add('visible');
-        downloadBtn.classList.add('visible');
+        currentTraceData = protoBytes;
 
-        setStatus('success', 'Conversion complete! Opening Perfetto...');
-
-        // Open Perfetto with the trace
-        await openPerfetto(currentTraceData, file.name, currentTraceFormat);
+        showSuccessState(file.name, file.size);
 
     } catch (err) {
-        setStatus('error', `Error: ${err.message}`);
+        showErrorState(`Error: ${err.message}`);
         console.error('Conversion error:', err);
-    } finally {
-        dropZone.classList.remove('processing');
     }
 }
 
 // Perfetto integration using postMessage API
-async function openPerfetto(traceData, fileName, format) {
+async function openPerfetto(traceData, fileName) {
     const PERFETTO_UI = 'https://ui.perfetto.dev';
 
-    // Get the trace buffer
-    let traceBuffer;
-    let traceFileName;
-
-    if (format === 'proto') {
-        // traceData is already a Uint8Array
-        traceBuffer = traceData.buffer;
-        traceFileName = fileName.replace('.binlog', '.pftrace');
-    } else {
-        // Convert JSON string to ArrayBuffer
-        const encoder = new TextEncoder();
-        traceBuffer = encoder.encode(traceData).buffer;
-        traceFileName = fileName.replace('.binlog', '.json');
-    }
+    // traceData is a Uint8Array
+    const traceBuffer = traceData.buffer;
+    const traceFileName = fileName.replace('.binlog', '.pftrace');
 
     // Open Perfetto in new window
     const perfettoWindow = window.open(PERFETTO_UI);
 
     if (!perfettoWindow) {
-        setStatus('error', 'Popup blocked! Please allow popups for this site, or use the download button.');
-        return;
+        throw new Error('Popup blocked! Please allow popups for this site.');
     }
 
     // Wait for Perfetto to be ready using PING/PONG handshake
@@ -239,7 +215,6 @@ async function openPerfetto(traceData, fileName, format) {
                 }
             }, PERFETTO_UI);
 
-            setStatus('success', 'Trace opened in Perfetto!');
             resolve();
         }
 
@@ -249,23 +224,13 @@ async function openPerfetto(traceData, fileName, format) {
 
 // Download trace file
 function downloadTrace() {
-    if (!currentTraceData) return;
+    if (!currentTraceData || !currentFileName) return;
 
-    let blob;
-    let extension;
-
-    if (currentTraceFormat === 'proto') {
-        blob = new Blob([currentTraceData], { type: 'application/octet-stream' });
-        extension = '.pftrace';
-    } else {
-        blob = new Blob([currentTraceData], { type: 'application/json' });
-        extension = '.json';
-    }
-
+    const blob = new Blob([currentTraceData], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = currentFileName.replace('.binlog', extension);
+    a.download = currentFileName.replace('.binlog', '.pftrace');
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -273,24 +238,34 @@ function downloadTrace() {
 }
 
 // Event listeners
-dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('click', (e) => {
+    // Don't trigger file input if clicking on buttons or if processing
+    if (isProcessing || e.target.tagName === 'BUTTON') return;
+    fileInput.click();
+});
 
 dropZone.addEventListener('dragover', (e) => {
     e.preventDefault();
     e.stopPropagation();
-    dropZone.classList.add('drag-over');
+    if (!isProcessing) {
+        dropZone.classList.add('drag-over');
+    }
 });
 
 dropZone.addEventListener('dragleave', (e) => {
     e.preventDefault();
     e.stopPropagation();
-    dropZone.classList.remove('drag-over');
+    if (!isProcessing) {
+        dropZone.classList.remove('drag-over');
+    }
 });
 
 dropZone.addEventListener('drop', (e) => {
     e.preventDefault();
     e.stopPropagation();
     dropZone.classList.remove('drag-over');
+
+    if (isProcessing) return;
 
     const files = e.dataTransfer.files;
     if (files.length > 0) {
@@ -303,8 +278,6 @@ fileInput.addEventListener('change', (e) => {
         handleFile(e.target.files[0]);
     }
 });
-
-downloadBtn.addEventListener('click', downloadTrace);
 
 // Initialize
 initWasm();
