@@ -30,13 +30,13 @@ jobs:
         run: dotnet workload install wasm-tools
 
       - name: Restore .NET dependencies
-        run: dotnet restore msbuild-binlog-perfview.csproj
+        run: dotnet restore src/MSBuildBinlogPerfView.csproj
 
       - name: Publish Blazor WASM
-        run: dotnet publish msbuild-binlog-perfview.csproj -c Release -o dist
+        run: dotnet publish src/MSBuildBinlogPerfView.csproj -c Release -o dist
 
       - name: Copy asset mappings for runtime resolution
-        run: cp dist/msbuild-binlog-perfview.staticwebassets.endpoints.json dist/wwwroot/_framework/asset-manifest.json
+        run: cp dist/MSBuildBinlogPerfView.staticwebassets.endpoints.json dist/wwwroot/_framework/asset-manifest.json
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3

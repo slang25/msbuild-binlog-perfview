@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/MSBuildBinlogPerfView.csproj" />
+  <Project Path="tests/MSBuildBinlogPerfView.Tests.csproj" />
+</Solution>

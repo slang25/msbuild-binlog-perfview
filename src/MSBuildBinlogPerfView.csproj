@@ -9,15 +9,6 @@
     <OverrideHtmlAssetPlaceholders>false</OverrideHtmlAssetPlaceholders>
   </PropertyGroup>
 
-  <!-- Exclude the Tests folder from compilation -->
-  <ItemGroup>
-    <Compile Remove="Tests\**" />
-    <Content Remove="Tests\**" />
-    <EmbeddedResource Remove="Tests\**" />
-    <None Remove="Tests\**" />
-  </ItemGroup>
-
-
   <ItemGroup>
     <PackageReference Include="MSBuild.StructuredLogger" Version="2.3.113" />
   </ItemGroup>
