@@ -430,6 +430,18 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
+// Copy command button
+const copyBtn = document.getElementById('copy-cmd-btn');
+copyBtn.addEventListener('click', async () => {
+    try {
+        await navigator.clipboard.writeText('dotnet build -bl');
+        copyBtn.classList.add('copied');
+        setTimeout(() => copyBtn.classList.remove('copied'), 1500);
+    } catch (err) {
+        console.error('Failed to copy:', err);
+    }
+});
+
 // Show welcome modal on load
 showWelcomeModal();
 
