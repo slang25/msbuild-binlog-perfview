@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <RootNamespace>msbuild_binlog_perfview.Tests</RootNamespace>
+    <RootNamespace>MSBuildBinlogPerfView.Tests</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
@@ -21,7 +21,7 @@
 
   <!-- Link to shared source files -->
   <ItemGroup>
-    <Compile Include="..\PerfettoTraceWriter.cs" Link="PerfettoTraceWriter.cs" />
+    <Compile Include="..\src\PerfettoTraceWriter.cs" Link="PerfettoTraceWriter.cs" />
   </ItemGroup>
 
 </Project>
