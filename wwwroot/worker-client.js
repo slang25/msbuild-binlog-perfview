@@ -164,3 +164,19 @@ export function waitForReady() {
     }
     return workerReadyPromise;
 }
+
+/**
+ * Cancels any in-progress conversion operation.
+ * This sends a cancel request to the worker which will signal the C# code to stop.
+ */
+export function cancel() {
+    if (!workerReady || workerError) {
+        return;
+    }
+    // Fire-and-forget cancel request
+    worker.postMessage({
+        method: 'BinlogConverter.Cancel',
+        args: [],
+        requestId: -1 // Special ID for cancel requests - no response expected
+    });
+}

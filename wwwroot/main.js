@@ -1,4 +1,4 @@
-import { invoke, waitForReady, setProgressCallback } from './worker-client.js'
+import { invoke, waitForReady, setProgressCallback, cancel as cancelWorker } from './worker-client.js'
 
 // DOM elements
 const dropZone = document.getElementById('drop-zone');
@@ -45,57 +45,132 @@ async function initWasm() {
 function showProcessingState(message, percent) {
     isProcessing = true;
     dropZone.className = 'processing';
-    dropZone.innerHTML = `
-        <div class="processing-content">
-            <div class="processing-spinner"></div>
-            ${currentFileName ? `<div class="processing-filename">${currentFileName}</div>` : ''}
-            <div class="processing-percent">${percent}%</div>
-            <div class="processing-message">${message}</div>
-        </div>
-    `;
+
+    // Build DOM safely to avoid XSS
+    const container = document.createElement('div');
+    container.className = 'processing-content';
+
+    const spinner = document.createElement('div');
+    spinner.className = 'processing-spinner';
+    container.appendChild(spinner);
+
+    if (currentFileName) {
+        const filenameDiv = document.createElement('div');
+        filenameDiv.className = 'processing-filename';
+        filenameDiv.textContent = currentFileName;
+        container.appendChild(filenameDiv);
+    }
+
+    const percentDiv = document.createElement('div');
+    percentDiv.className = 'processing-percent';
+    percentDiv.textContent = `${percent}%`;
+    container.appendChild(percentDiv);
+
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'processing-message';
+    messageDiv.textContent = message;
+    container.appendChild(messageDiv);
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn btn-secondary btn-cancel';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', handleCancel);
+    container.appendChild(cancelBtn);
+
+    dropZone.innerHTML = '';
+    dropZone.appendChild(container);
+}
+
+// Handle cancel button click
+function handleCancel() {
+    cancelWorker();
 }
 
 // Show success state in drop zone
 function showSuccessState(fileName, fileSize) {
     isProcessing = false;
     dropZone.className = 'success';
-    dropZone.innerHTML = `
-        <div class="success-content">
-            <div class="success-icon">✓</div>
-            <div class="success-message">Conversion complete!</div>
-            <div class="success-filename">${fileName} (${formatFileSize(fileSize)})</div>
-            <div class="success-actions">
-                <button class="btn btn-primary" id="open-perfetto-btn">Open in Perfetto</button>
-                <button class="btn btn-secondary" id="download-btn">Download</button>
-            </div>
-            <button class="btn-link" id="convert-another-btn">Convert another file</button>
-        </div>
-    `;
 
-    // Add event listeners for buttons
-    // Open in Perfetto - must be user-initiated click to avoid popup blocker
-    document.getElementById('open-perfetto-btn').addEventListener('click', () => {
+    // Build DOM safely to avoid XSS
+    const container = document.createElement('div');
+    container.className = 'success-content';
+
+    const icon = document.createElement('div');
+    icon.className = 'success-icon';
+    icon.textContent = '\u2713'; // checkmark
+    container.appendChild(icon);
+
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'success-message';
+    msgDiv.textContent = 'Conversion complete!';
+    container.appendChild(msgDiv);
+
+    const filenameDiv = document.createElement('div');
+    filenameDiv.className = 'success-filename';
+    filenameDiv.textContent = `${fileName} (${formatFileSize(fileSize)})`;
+    container.appendChild(filenameDiv);
+
+    const actionsDiv = document.createElement('div');
+    actionsDiv.className = 'success-actions';
+
+    const openBtn = document.createElement('button');
+    openBtn.className = 'btn btn-primary';
+    openBtn.textContent = 'Open in Perfetto';
+    openBtn.addEventListener('click', () => {
         openPerfetto(currentTraceData, currentFileName);
     });
-    document.getElementById('download-btn').addEventListener('click', downloadTrace);
-    document.getElementById('convert-another-btn').addEventListener('click', resetDropZone);
+    actionsDiv.appendChild(openBtn);
+
+    const downloadBtn = document.createElement('button');
+    downloadBtn.className = 'btn btn-secondary';
+    downloadBtn.textContent = 'Download';
+    downloadBtn.addEventListener('click', downloadTrace);
+    actionsDiv.appendChild(downloadBtn);
+
+    container.appendChild(actionsDiv);
+
+    const convertAnotherBtn = document.createElement('button');
+    convertAnotherBtn.className = 'btn-link';
+    convertAnotherBtn.textContent = 'Convert another file';
+    convertAnotherBtn.addEventListener('click', resetDropZone);
+    container.appendChild(convertAnotherBtn);
+
+    dropZone.innerHTML = '';
+    dropZone.appendChild(container);
 }
 
 // Show error state in drop zone
 function showErrorState(message) {
     isProcessing = false;
     dropZone.className = 'error';
-    dropZone.innerHTML = `
-        <div class="error-content">
-            <div class="error-icon">✕</div>
-            <div class="error-message">${message}</div>
-            <div class="success-actions">
-                <button class="btn btn-secondary" id="try-again-btn">Try Again</button>
-            </div>
-        </div>
-    `;
 
-    document.getElementById('try-again-btn').addEventListener('click', resetDropZone);
+    // Build DOM safely to avoid XSS
+    const container = document.createElement('div');
+    container.className = 'error-content';
+
+    const icon = document.createElement('div');
+    icon.className = 'error-icon';
+    icon.textContent = '\u2715'; // X mark
+    container.appendChild(icon);
+
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'error-message';
+    msgDiv.textContent = message;
+    container.appendChild(msgDiv);
+
+    const actionsDiv = document.createElement('div');
+    actionsDiv.className = 'success-actions';
+
+    const tryAgainBtn = document.createElement('button');
+    tryAgainBtn.className = 'btn btn-secondary';
+    tryAgainBtn.textContent = 'Try Again';
+    tryAgainBtn.addEventListener('click', resetDropZone);
+    actionsDiv.appendChild(tryAgainBtn);
+
+    container.appendChild(actionsDiv);
+
+    dropZone.innerHTML = '';
+    dropZone.appendChild(container);
 }
 
 // Reset drop zone to original state
@@ -146,7 +221,7 @@ async function handleFile(file) {
         // Get options
         const opts = getOptions();
 
-        // Call protobuf converter via worker
+        // Call protobuf converter via worker - returns byte array, throws on error
         const protoBytes = await invoke('BinlogConverter.ConvertToProtobuf', [
             bytes,
             opts.projects,
@@ -162,10 +237,14 @@ async function handleFile(file) {
         }
 
         currentTraceData = protoBytes;
-
         showSuccessState(file.name, file.size);
 
     } catch (err) {
+        // Check if the operation was cancelled
+        if (err.message && err.message.includes('canceled')) {
+            resetDropZone();
+            return;
+        }
         showErrorState(`Error: ${err.message}`);
         console.error('Conversion error:', err);
     }
@@ -189,6 +268,7 @@ async function openPerfetto(traceData, fileName) {
     // Wait for Perfetto to be ready using PING/PONG handshake
     return new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
+            clearInterval(pingInterval);
             window.removeEventListener('message', messageHandler);
             reject(new Error('Timeout waiting for Perfetto UI'));
         }, 30000);
