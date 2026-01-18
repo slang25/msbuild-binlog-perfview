@@ -26,14 +26,38 @@
       padding: 20px;
     }
 
+    .header {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-bottom: 30px;
+    }
+
+    .logo-row {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .logo {
+      height: 48px;
+      width: auto;
+    }
+
+    .logo-arrow {
+      color: #3282b8;
+      font-size: 1.5rem;
+      font-weight: 300;
+    }
+
     h1 {
-      margin-bottom: 10px;
+      margin-bottom: 8px;
       font-size: 1.8rem;
       color: #fff;
     }
 
     .subtitle {
-      margin-bottom: 30px;
       color: #888;
       font-size: 0.95rem;
     }
@@ -92,21 +116,48 @@
       margin-top: 8px;
     }
 
-    /* Processing state - large spinner and progress */
+    /* Processing state - circular progress indicator */
     .processing-content {
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 20px;
+      gap: 16px;
     }
 
-    .processing-spinner {
-      width: 64px;
-      height: 64px;
-      border: 4px solid #3282b8;
-      border-top-color: transparent;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
+    .progress-circle {
+      position: relative;
+      width: 120px;
+      height: 120px;
+    }
+
+    .progress-circle svg {
+      transform: rotate(-90deg);
+      width: 120px;
+      height: 120px;
+    }
+
+    .progress-circle .bg {
+      fill: none;
+      stroke: #2a2a4e;
+      stroke-width: 8;
+    }
+
+    .progress-circle .progress {
+      fill: none;
+      stroke: #3282b8;
+      stroke-width: 8;
+      stroke-linecap: round;
+      transition: stroke-dashoffset 0.3s ease;
+    }
+
+    .progress-circle .percent-text {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 1.75rem;
+      font-weight: bold;
+      color: #fff;
     }
 
     .processing-filename {
@@ -118,12 +169,6 @@
     .processing-message {
       font-size: 0.95rem;
       color: #bbb;
-    }
-
-    .processing-percent {
-      font-size: 2rem;
-      font-weight: bold;
-      color: #3282b8;
     }
 
     /* Success state */
@@ -156,6 +201,8 @@
 
     .success-actions {
       display: flex;
+      flex-direction: column;
+      align-items: center;
       gap: 12px;
       margin-top: 8px;
     }
@@ -166,16 +213,23 @@
       border-radius: 6px;
       cursor: pointer;
       font-size: 0.9rem;
-      transition: background 0.15s;
+      transition: all 0.15s;
     }
 
     .btn-primary {
-      background: #3282b8;
+      background: linear-gradient(135deg, #3282b8 0%, #0f4c75 100%);
       color: #fff;
+      padding: 14px 32px;
+      font-size: 1.1rem;
+      font-weight: 600;
+      border-radius: 8px;
+      box-shadow: 0 4px 14px rgba(50, 130, 184, 0.4);
     }
 
     .btn-primary:hover {
-      background: #4a9fd4;
+      background: linear-gradient(135deg, #4a9fd4 0%, #3282b8 100%);
+      box-shadow: 0 6px 20px rgba(50, 130, 184, 0.5);
+      transform: translateY(-1px);
     }
 
     .btn-secondary {
@@ -194,12 +248,17 @@
       cursor: pointer;
       font-size: 0.85rem;
       padding: 8px;
-      margin-top: 8px;
     }
 
     .btn-link:hover {
       color: #999;
       text-decoration: underline;
+    }
+
+    .secondary-actions {
+      display: flex;
+      gap: 16px;
+      align-items: center;
     }
 
     #file-input {
@@ -303,11 +362,143 @@
     footer a:hover {
       text-decoration: underline;
     }
+
+    /* Welcome modal */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.2s, visibility 0.2s;
+    }
+
+    .modal-overlay.visible {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .modal {
+      background: #1e2a4a;
+      border-radius: 16px;
+      padding: 32px;
+      max-width: 500px;
+      width: 90%;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      transform: scale(0.95);
+      transition: transform 0.2s;
+    }
+
+    .modal-overlay.visible .modal {
+      transform: scale(1);
+    }
+
+    .modal-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .modal-icon {
+      font-size: 32px;
+    }
+
+    .modal-title {
+      font-size: 1.4rem;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .modal-section {
+      margin-bottom: 20px;
+    }
+
+    .modal-section-title {
+      font-size: 0.85rem;
+      color: #3282b8;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    .modal-text {
+      font-size: 0.95rem;
+      color: #bbb;
+      line-height: 1.5;
+    }
+
+    .modal-code {
+      background: #0d1526;
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+      font-size: 0.9rem;
+      color: #8aff9a;
+      margin-top: 8px;
+      border: 1px solid #2a3a5a;
+    }
+
+    .modal-features {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .modal-feature {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.9rem;
+      color: #ccc;
+    }
+
+    .modal-feature-icon {
+      color: #3282b8;
+      font-size: 1.1rem;
+    }
+
+    .modal-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 24px;
+      padding-top: 20px;
+      border-top: 1px solid #2a3a5a;
+    }
+
+    .modal-checkbox {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.85rem;
+      color: #888;
+      cursor: pointer;
+    }
+
+    .modal-checkbox input {
+      accent-color: #3282b8;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
-  <h1>MSBuild Binlog to Perfetto</h1>
-  <p class="subtitle">Convert MSBuild binary logs to interactive trace visualizations</p>
+  <header class="header">
+    <div class="logo-row">
+      <img src="assets/msbuild.svg" alt="MSBuild" class="logo">
+      <span class="logo-arrow">&#x2192;</span>
+      <img src="assets/perfetto.png" alt="Perfetto" class="logo">
+    </div>
+    <h1>MSBuild Binlog to Perfetto</h1>
+    <p class="subtitle">Convert MSBuild binary logs to interactive trace visualizations</p>
+  </header>
 
   <div id="drop-zone">
     <div class="drop-icon">📁</div>
@@ -351,5 +542,60 @@
     Powered by <a href="https://perfetto.dev" target="_blank">Perfetto</a> |
     Uses <a href="https://github.com/KirillOsenkov/MSBuildStructuredLog" target="_blank">MSBuild.StructuredLogger</a>
   </footer>
+
+  <div id="welcome-modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-icon">&#x1F4CA;</span>
+        <span class="modal-title">Welcome!</span>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-title">What is this?</div>
+        <div class="modal-text">
+          This tool converts MSBuild binary logs into interactive flame graphs using Perfetto, helping you visualize and analyze your build performance.
+        </div>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-title">Creating a binlog</div>
+        <div class="modal-text">
+          Generate a binary log by adding the <code>-bl</code> flag to your build:
+        </div>
+        <div class="modal-code">dotnet build -bl</div>
+        <div class="modal-text" style="margin-top: 8px; font-size: 0.85rem; color: #888;">
+          This creates <code>msbuild.binlog</code> in your project directory.
+        </div>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-section-title">What you'll see</div>
+        <div class="modal-features">
+          <div class="modal-feature">
+            <span class="modal-feature-icon">&#x23F1;</span>
+            <span>Timeline of all build events</span>
+          </div>
+          <div class="modal-feature">
+            <span class="modal-feature-icon">&#x1F50D;</span>
+            <span>Identify slow targets and tasks</span>
+          </div>
+          <div class="modal-feature">
+            <span class="modal-feature-icon">&#x1F4CA;</span>
+            <span>Parallel execution visualization</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <label class="modal-checkbox">
+          <input type="checkbox" id="dont-show-again">
+          Don't show again
+        </label>
+        <button class="btn btn-primary" id="modal-close-btn" style="padding: 10px 24px; font-size: 0.95rem;">
+          Get Started
+        </button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

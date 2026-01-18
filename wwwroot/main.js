@@ -41,7 +41,7 @@ async function initWasm() {
     }
 }
 
-// Show processing state in drop zone
+// Show processing state in drop zone with circular progress
 function showProcessingState(message, percent) {
     isProcessing = true;
     dropZone.className = 'processing';
@@ -50,9 +50,41 @@ function showProcessingState(message, percent) {
     const container = document.createElement('div');
     container.className = 'processing-content';
 
-    const spinner = document.createElement('div');
-    spinner.className = 'processing-spinner';
-    container.appendChild(spinner);
+    // Circular progress indicator
+    const circleContainer = document.createElement('div');
+    circleContainer.className = 'progress-circle';
+
+    const radius = 52;
+    const circumference = 2 * Math.PI * radius;
+    const offset = circumference - (percent / 100) * circumference;
+
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 120 120');
+
+    const bgCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    bgCircle.setAttribute('class', 'bg');
+    bgCircle.setAttribute('cx', '60');
+    bgCircle.setAttribute('cy', '60');
+    bgCircle.setAttribute('r', radius.toString());
+    svg.appendChild(bgCircle);
+
+    const progressCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    progressCircle.setAttribute('class', 'progress');
+    progressCircle.setAttribute('cx', '60');
+    progressCircle.setAttribute('cy', '60');
+    progressCircle.setAttribute('r', radius.toString());
+    progressCircle.style.strokeDasharray = circumference.toString();
+    progressCircle.style.strokeDashoffset = offset.toString();
+    svg.appendChild(progressCircle);
+
+    circleContainer.appendChild(svg);
+
+    const percentText = document.createElement('div');
+    percentText.className = 'percent-text';
+    percentText.textContent = `${percent}%`;
+    circleContainer.appendChild(percentText);
+
+    container.appendChild(circleContainer);
 
     if (currentFileName) {
         const filenameDiv = document.createElement('div');
@@ -60,11 +92,6 @@ function showProcessingState(message, percent) {
         filenameDiv.textContent = currentFileName;
         container.appendChild(filenameDiv);
     }
-
-    const percentDiv = document.createElement('div');
-    percentDiv.className = 'processing-percent';
-    percentDiv.textContent = `${percent}%`;
-    container.appendChild(percentDiv);
 
     const messageDiv = document.createElement('div');
     messageDiv.className = 'processing-message';
@@ -121,19 +148,28 @@ function showSuccessState(fileName, fileSize) {
     });
     actionsDiv.appendChild(openBtn);
 
-    const downloadBtn = document.createElement('button');
-    downloadBtn.className = 'btn btn-secondary';
-    downloadBtn.textContent = 'Download';
-    downloadBtn.addEventListener('click', downloadTrace);
-    actionsDiv.appendChild(downloadBtn);
+    const secondaryActions = document.createElement('div');
+    secondaryActions.className = 'secondary-actions';
 
-    container.appendChild(actionsDiv);
+    const downloadBtn = document.createElement('button');
+    downloadBtn.className = 'btn-link';
+    downloadBtn.textContent = 'Download trace';
+    downloadBtn.addEventListener('click', downloadTrace);
+    secondaryActions.appendChild(downloadBtn);
+
+    const separator = document.createElement('span');
+    separator.textContent = '·';
+    separator.style.color = '#555';
+    secondaryActions.appendChild(separator);
 
     const convertAnotherBtn = document.createElement('button');
     convertAnotherBtn.className = 'btn-link';
-    convertAnotherBtn.textContent = 'Convert another file';
+    convertAnotherBtn.textContent = 'Convert another';
     convertAnotherBtn.addEventListener('click', resetDropZone);
-    container.appendChild(convertAnotherBtn);
+    secondaryActions.appendChild(convertAnotherBtn);
+
+    actionsDiv.appendChild(secondaryActions);
+    container.appendChild(actionsDiv);
 
     dropZone.innerHTML = '';
     dropZone.appendChild(container);
@@ -358,6 +394,44 @@ fileInput.addEventListener('change', (e) => {
         handleFile(e.target.files[0]);
     }
 });
+
+// Welcome modal
+const welcomeModal = document.getElementById('welcome-modal');
+const modalCloseBtn = document.getElementById('modal-close-btn');
+const dontShowAgainCheckbox = document.getElementById('dont-show-again');
+
+function showWelcomeModal() {
+    if (localStorage.getItem('hideWelcomeModal') === 'true') {
+        return;
+    }
+    welcomeModal.classList.add('visible');
+}
+
+function hideWelcomeModal() {
+    if (dontShowAgainCheckbox.checked) {
+        localStorage.setItem('hideWelcomeModal', 'true');
+    }
+    welcomeModal.classList.remove('visible');
+}
+
+modalCloseBtn.addEventListener('click', hideWelcomeModal);
+
+// Close modal when clicking overlay (but not the modal itself)
+welcomeModal.addEventListener('click', (e) => {
+    if (e.target === welcomeModal) {
+        hideWelcomeModal();
+    }
+});
+
+// Close modal with Escape key
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && welcomeModal.classList.contains('visible')) {
+        hideWelcomeModal();
+    }
+});
+
+// Show welcome modal on load
+showWelcomeModal();
 
 // Initialize
 initWasm();

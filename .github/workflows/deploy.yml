@@ -1,0 +1,46 @@
+name: Build and Deploy to Cloudflare Pages
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      deployments: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install wasm-tools workload
+        run: dotnet workload install wasm-tools
+
+      - name: Restore .NET dependencies
+        run: dotnet restore msbuild-binlog-perfview.csproj
+
+      - name: Publish Blazor WASM
+        run: dotnet publish msbuild-binlog-perfview.csproj -c Release -o dist
+
+      - name: Copy asset mappings for runtime resolution
+        run: cp dist/msbuild-binlog-perfview.staticwebassets.endpoints.json dist/wwwroot/_framework/asset-manifest.json
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist/wwwroot --project-name=${{ vars.CLOUDFLARE_PROJECT_NAME }}
