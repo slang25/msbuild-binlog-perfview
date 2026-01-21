@@ -1,10 +1,13 @@
 #nullable enable
+using System;
+using System.Buffers;
 using System.IO;
 using System.Text;
 
 /// <summary>
 /// Writes Perfetto trace protobuf format manually.
 /// Based on https://perfetto.dev/docs/reference/trace-packet-proto
+/// Optimized for minimal allocations using span-based writing.
 /// </summary>
 public class PerfettoTraceWriter
 {
@@ -46,22 +49,34 @@ public class PerfettoTraceWriter
 
     public void WriteProcessTrackDescriptor(ulong uuid, uint pid, string name)
     {
-        using var packet = new MemoryStream();
+        int nameByteCount = Encoding.UTF8.GetByteCount(name);
 
-        using var td = new MemoryStream();
-        WriteVarint(td, TD_UUID, uuid);
-        WriteString(td, TD_NAME, name);
+        // Calculate ProcessDescriptor size
+        int pdSize = GetTaggedVarintSize(PD_PID, pid)
+                   + GetLengthDelimitedSize(PD_PROCESS_NAME, nameByteCount);
 
-        using var pd = new MemoryStream();
-        WriteVarint(pd, PD_PID, pid);
-        WriteString(pd, PD_PROCESS_NAME, name);
-        WriteLengthDelimited(td, TD_PROCESS, pd.ToArray());
+        // Calculate TrackDescriptor size
+        int tdSize = GetTaggedVarintSize(TD_UUID, uuid)
+                   + GetLengthDelimitedSize(TD_NAME, nameByteCount)
+                   + GetLengthDelimitedSize(TD_PROCESS, pdSize);
 
-        WriteLengthDelimited(packet, TRACK_DESCRIPTOR, td.ToArray());
-        WriteVarint(packet, TRUSTED_PACKET_SEQ_ID, _sequenceId);
-        WriteSequenceFlags(packet);
+        // Calculate packet size
+        int seqFlags = GetSequenceFlagsValue();
+        int packetSize = GetLengthDelimitedSize(TRACK_DESCRIPTOR, tdSize)
+                       + GetTaggedVarintSize(TRUSTED_PACKET_SEQ_ID, _sequenceId)
+                       + GetTaggedVarintSize(SEQUENCE_FLAGS, (ulong)seqFlags);
 
-        WriteLengthDelimited(_stream, TRACE_PACKET, packet.ToArray());
+        // Write everything directly to _stream
+        WriteLengthPrefix(TRACE_PACKET, packetSize);
+        WriteLengthPrefix(TRACK_DESCRIPTOR, tdSize);
+        WriteTaggedVarint(TD_UUID, uuid);
+        WriteStringField(TD_NAME, name, nameByteCount);
+        WriteLengthPrefix(TD_PROCESS, pdSize);
+        WriteTaggedVarint(PD_PID, pid);
+        WriteStringField(PD_PROCESS_NAME, name, nameByteCount);
+        WriteTaggedVarint(TRUSTED_PACKET_SEQ_ID, _sequenceId);
+        WriteTaggedVarint(SEQUENCE_FLAGS, (ulong)seqFlags);
+        _firstPacket = false;
     }
 
     public void WriteSliceBegin(ulong trackUuid, long timestampNs, string name, string category)
@@ -81,40 +96,121 @@ public class PerfettoTraceWriter
 
     private void WriteTrackEvent(ulong trackUuid, long timestampNs, string? name, string? category, int type)
     {
-        using var packet = new MemoryStream();
+        int nameByteCount = name != null ? Encoding.UTF8.GetByteCount(name) : 0;
+        int categoryByteCount = category != null ? Encoding.UTF8.GetByteCount(category) : 0;
 
-        WriteVarint(packet, TIMESTAMP, (ulong)timestampNs);
-
-        using var te = new MemoryStream();
-        WriteVarint(te, TE_TYPE, (ulong)type);
-        WriteVarint(te, TE_TRACK_UUID, trackUuid);
+        // Calculate TrackEvent size
+        int teSize = GetTaggedVarintSize(TE_TYPE, (ulong)type)
+                   + GetTaggedVarintSize(TE_TRACK_UUID, trackUuid);
         if (name != null)
-            WriteString(te, TE_NAME, name);
+            teSize += GetLengthDelimitedSize(TE_NAME, nameByteCount);
         if (category != null)
-            WriteString(te, TE_CATEGORIES, category);
+            teSize += GetLengthDelimitedSize(TE_CATEGORIES, categoryByteCount);
 
-        WriteLengthDelimited(packet, TRACK_EVENT, te.ToArray());
-        WriteVarint(packet, TRUSTED_PACKET_SEQ_ID, _sequenceId);
-        WriteSequenceFlags(packet);
+        // Calculate packet size
+        int seqFlags = GetSequenceFlagsValue();
+        int packetSize = GetTaggedVarintSize(TIMESTAMP, (ulong)timestampNs)
+                       + GetLengthDelimitedSize(TRACK_EVENT, teSize)
+                       + GetTaggedVarintSize(TRUSTED_PACKET_SEQ_ID, _sequenceId)
+                       + GetTaggedVarintSize(SEQUENCE_FLAGS, (ulong)seqFlags);
 
-        WriteLengthDelimited(_stream, TRACE_PACKET, packet.ToArray());
+        // Write everything directly to _stream
+        WriteLengthPrefix(TRACE_PACKET, packetSize);
+        WriteTaggedVarint(TIMESTAMP, (ulong)timestampNs);
+        WriteLengthPrefix(TRACK_EVENT, teSize);
+        WriteTaggedVarint(TE_TYPE, (ulong)type);
+        WriteTaggedVarint(TE_TRACK_UUID, trackUuid);
+        if (name != null)
+            WriteStringField(TE_NAME, name, nameByteCount);
+        if (category != null)
+            WriteStringField(TE_CATEGORIES, category, categoryByteCount);
+        WriteTaggedVarint(TRUSTED_PACKET_SEQ_ID, _sequenceId);
+        WriteTaggedVarint(SEQUENCE_FLAGS, (ulong)seqFlags);
+        _firstPacket = false;
     }
 
-    private void WriteSequenceFlags(MemoryStream packet)
+    private int GetSequenceFlagsValue()
     {
-        if (_firstPacket)
-        {
-            WriteVarint(packet, SEQUENCE_FLAGS, SEQ_INCREMENTAL_STATE_CLEARED | SEQ_NEEDS_INCREMENTAL_STATE);
-            _firstPacket = false;
-        }
-        else
-        {
-            WriteVarint(packet, SEQUENCE_FLAGS, SEQ_NEEDS_INCREMENTAL_STATE);
-        }
+        return _firstPacket
+            ? SEQ_INCREMENTAL_STATE_CLEARED | SEQ_NEEDS_INCREMENTAL_STATE
+            : SEQ_NEEDS_INCREMENTAL_STATE;
     }
 
     public byte[] ToArray() => _stream.ToArray();
 
+    // Size calculation helpers
+    internal static int GetVarintSize(ulong value)
+    {
+        int size = 1;
+        while (value > 127)
+        {
+            size++;
+            value >>= 7;
+        }
+        return size;
+    }
+
+    internal static int GetTaggedVarintSize(int fieldNumber, ulong value)
+        => GetVarintSize((ulong)(fieldNumber << 3)) + GetVarintSize(value);
+
+    internal static int GetLengthDelimitedSize(int fieldNumber, int contentLength)
+        => GetVarintSize((ulong)((fieldNumber << 3) | 2)) + GetVarintSize((ulong)contentLength) + contentLength;
+
+    // Span-based writing helpers
+    internal static int WriteVarintToSpan(Span<byte> buffer, ulong value)
+    {
+        int pos = 0;
+        while (value > 127)
+        {
+            buffer[pos++] = (byte)((value & 0x7F) | 0x80);
+            value >>= 7;
+        }
+        buffer[pos++] = (byte)value;
+        return pos;
+    }
+
+    private void WriteTaggedVarint(int fieldNumber, ulong value)
+    {
+        Span<byte> buffer = stackalloc byte[20];
+        int pos = WriteVarintToSpan(buffer, (ulong)(fieldNumber << 3));
+        pos += WriteVarintToSpan(buffer[pos..], value);
+        _stream.Write(buffer[..pos]);
+    }
+
+    private void WriteLengthPrefix(int fieldNumber, int length)
+    {
+        Span<byte> buffer = stackalloc byte[15];
+        int pos = WriteVarintToSpan(buffer, (ulong)((fieldNumber << 3) | 2));
+        pos += WriteVarintToSpan(buffer[pos..], (ulong)length);
+        _stream.Write(buffer[..pos]);
+    }
+
+    private void WriteStringField(int fieldNumber, string value, int byteCount)
+    {
+        WriteLengthPrefix(fieldNumber, byteCount);
+
+        if (byteCount <= 256)
+        {
+            Span<byte> buffer = stackalloc byte[256];
+            Encoding.UTF8.GetBytes(value.AsSpan(), buffer);
+            _stream.Write(buffer[..byteCount]);
+        }
+        else
+        {
+            byte[] rented = ArrayPool<byte>.Shared.Rent(byteCount);
+            try
+            {
+                Encoding.UTF8.GetBytes(value, 0, value.Length, rented, 0);
+                _stream.Write(rented, 0, byteCount);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(rented);
+            }
+        }
+    }
+
+    // Original static methods kept for backward compatibility and testing
     internal static void WriteVarint(Stream s, int fieldNumber, ulong value)
     {
         WriteRawVarint(s, (ulong)((fieldNumber << 3) | 0));
