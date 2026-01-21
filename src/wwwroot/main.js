@@ -5,6 +5,7 @@ const dropZone = document.getElementById('drop-zone');
 const fileInput = document.getElementById('file-input');
 
 // Option checkboxes
+const optEvaluation = document.getElementById('opt-evaluation');
 const optProjects = document.getElementById('opt-projects');
 const optTargets = document.getElementById('opt-targets');
 const optTasks = document.getElementById('opt-tasks');
@@ -227,6 +228,7 @@ function formatFileSize(bytes) {
 // Get current options from checkboxes
 function getOptions() {
     return {
+        evaluation: optEvaluation.checked,
         projects: optProjects.checked,
         targets: optTargets.checked,
         tasks: optTasks.checked,
@@ -265,7 +267,8 @@ async function handleFile(file) {
             opts.tasks,
             opts.messages,
             opts.warnings,
-            opts.errors
+            opts.errors,
+            opts.evaluation
         ]);
 
         if (protoBytes.length === 0) {
